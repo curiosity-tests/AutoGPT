@@ -26,30 +26,67 @@ on:
   #   gh workflow run platform-backend-ci.yml --ref <branch> -f pr_number=<PR#>
   workflow_dispatch:
     inputs:
+      leg:
+        description: "baseline (uninstrumented) or instrumented (under chalk/curiosity)"
+        type: choice
+        options: [instrumented, baseline]
+        default: instrumented
+      profile:
+        description: "CrashOverride chalk profile"
+        type: string
+        default: curiosity-tests-racecar
+      racecar_run:
+        description: "racecar correlation token, echoed into the run name"
+        type: string
+        default: ""
       pr_number:
         description: "Open PR number to attach this coverage upload to (refreshes that PR's codecov status). Leave blank for a plain branch run."
         required: false
         type: string
 
 concurrency:
-  group: ${{ format('backend-ci-{0}', github.head_ref && format('{0}-{1}', github.event_name, github.event.pull_request.number) || github.sha) }}
-  cancel-in-progress: ${{ startsWith(github.event_name, 'pull_request') }}
+  group: ${{ format('backend-ci-{0}', github.head_ref && format('{0}-{1}', github.event_name, github.event.pull_request.number) || github.sha) }}-${{ inputs.leg || 'push' }}-${{ inputs.racecar_run }}
+  cancel-in-progress: false
 
 defaults:
   run:
     shell: bash
     working-directory: autogpt_platform/backend
 
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  # The one variable that separates the arms: on baseline, action-checkout
+  # skips its Set up Chalk step entirely.
+  CHALK_ON: ${{ github.event_name == 'workflow_dispatch' && inputs.leg != 'baseline' }}
+
+run-name: "AutoGPT Platform - Backend CI ${{ inputs.leg || 'push' }} ${{ inputs.racecar_run }}"
+
 jobs:
   lint:
     permissions:
       contents: read
+      id-token: write
     timeout-minutes: 10
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: crashappsec/action-checkout@main
+        with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          observables_continue_on_error: false
+          lfs: false
+      - name: Assert instrumentation is live
+        # not the job's defaults.run.working-directory: that directory may not exist yet
+        working-directory: ${{ github.workspace }}
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -84,6 +121,7 @@ jobs:
   autogpt-libs-test:
     permissions:
       contents: read
+      id-token: write
     timeout-minutes: 10
     runs-on: ubuntu-latest
     defaults:
@@ -93,7 +131,19 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: crashappsec/action-checkout@main
+        with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          observables_continue_on_error: false
+          lfs: false
+      - name: Assert instrumentation is live
+        # not the job's defaults.run.working-directory: that directory may not exist yet
+        working-directory: ${{ github.workspace }}
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -125,6 +175,7 @@ jobs:
   type-check:
     permissions:
       contents: read
+      id-token: write
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -134,7 +185,19 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: crashappsec/action-checkout@main
+        with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          observables_continue_on_error: false
+          lfs: false
+      - name: Assert instrumentation is live
+        # not the job's defaults.run.working-directory: that directory may not exist yet
+        working-directory: ${{ github.workspace }}
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -169,6 +232,7 @@ jobs:
   test:
     permissions:
       contents: read
+      id-token: write
     # The suite is ~10.6k tests run serially (no pytest-xdist): the pytest step
     # alone measures p50 ~13min / max ~18min, on top of 2-7min of container,
     # checkout and dependency setup. A 20min cap sat *below* the job's real p95,
@@ -253,8 +317,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: crashappsec/action-checkout@main
         with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          observables_continue_on_error: false
+          lfs: false
           # Full ref history is needed so the "Install Poetry" step below can
           # read poetry.lock off the base branch. `filter: blob:none` keeps
           # every ref reachable while skipping the blob download for all of
@@ -265,6 +333,13 @@ jobs:
           fetch-depth: 0
           filter: blob:none
           submodules: true
+      - name: Assert instrumentation is live
+        # not the job's defaults.run.working-directory: that directory may not exist yet
+        working-directory: ${{ github.workspace }}
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
