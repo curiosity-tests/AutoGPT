@@ -45,7 +45,7 @@ on:
         type: string
 
 concurrency:
-  group: ${{ format('backend-ci-{0}', github.head_ref && format('{0}-{1}', github.event_name, github.event.pull_request.number) || github.sha) }}-${{ inputs.leg || 'push' }}-${{ inputs.racecar_run }}
+  group: ${{ format('backend-ci-{0}', github.head_ref && format('{0}-{1}', 'push', github.event.pull_request.number) || github.sha) }}-${{ inputs.leg || 'push' }}-${{ inputs.racecar_run }}
   cancel-in-progress: false
 
 defaults:
@@ -60,7 +60,7 @@ permissions:
 env:
   # The one variable that separates the arms: on baseline, action-checkout
   # skips its Set up Chalk step entirely.
-  CHALK_ON: ${{ github.event_name == 'workflow_dispatch' && inputs.leg != 'baseline' }}
+  CHALK_ON: ${{ inputs.leg == 'instrumented' }}
 
 run-name: "AutoGPT Platform - Backend CI ${{ inputs.leg || 'push' }} ${{ inputs.racecar_run }}"
 
@@ -552,7 +552,7 @@ jobs:
           # codecov re-evaluates that PR's project status against its base.
           # Empty for all automatic events (push/pull_request/merge_group), so
           # their normal PR/commit detection is unchanged.
-          override_pr: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number || '' }}
+          override_pr: ${{ 'push' == 'workflow_dispatch' && inputs.pr_number || '' }}
 
     env:
       CI: true
